@@ -14,6 +14,7 @@ import random
 import csv
 import math
 from dotenv import load_dotenv
+from airflow.models import Variable
 
 load_dotenv()
 
@@ -565,16 +566,16 @@ def add_geocoding_data():
 
 def upload_to_s3():
     try:
-        bucket = os.getenv("S3_BUCKET")
-        key = os.getenv("S3_KEY")
+        bucket = Variable.get("S3_BUCKET")
+        key = Variable.get("S3_KEY")
 
         if not bucket or not key:
             raise ValueError("Missing S3_BUCKET or S3_KEY in environment variables")
 
         s3 = boto3.client(
             "s3",
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_KEY")
+            aws_access_key_id=Variable.get("AWS_ACCESS_KEY"),
+            aws_secret_access_key=Variable.get("AWS_SECRET_KEY")
         )
 
         # Upload the geocoded file instead of the raw file
@@ -588,12 +589,12 @@ def load_into_snowflake():
     conn = None
     cursor = None
     try:
-        snow_user = os.getenv("SNOWFLAKE_USER")
-        snow_password = os.getenv("SNOWFLAKE_PASSWORD")
-        snow_account = os.getenv("SNOWFLAKE_ACCOUNT")
-        snow_warehouse = os.getenv("SNOWFLAKE_WAREHOUSE")
-        snow_database = os.getenv("SNOWFLAKE_DATABASE")
-        snow_schema = os.getenv("SNOWFLAKE_SCHEMA")
+        snow_user = Variable.get("SNOWFLAKE_USER")
+        snow_password = Variable.get("SNOWFLAKE_PASSWORD")
+        snow_account = Variable.get("SNOWFLAKE_ACCOUNT")
+        snow_warehouse = Variable.get("SNOWFLAKE_WAREHOUSE")
+        snow_database = Variable.get("SNOWFLAKE_DATABASE")
+        snow_schema = Variable.get("SNOWFLAKE_SCHEMA")
         
         logger.info("Connecting to Snowflake...")
         conn = snowflake.connector.connect(
@@ -610,12 +611,12 @@ def load_into_snowflake():
         cursor.execute("USE ROLE ACCOUNTADMIN")
         
         table = "HOTEL_DATA"
-        s3_bucket = os.getenv("S3_BUCKET")
-        s3_key = os.getenv("S3_KEY")
+        s3_bucket = Variable.get("S3_BUCKET")
+        s3_key = Variable.get("S3_KEY")
         stage_name = "ihg_hotels_stage"
      
-        aws_key = os.getenv("AWS_ACCESS_KEY")
-        aws_secret = os.getenv("AWS_SECRET_KEY")
+        aws_key = Variable.get("AWS_ACCESS_KEY")
+        aws_secret = Variable.get("AWS_SECRET_KEY")
 
         logger.info("Creating stage and table in Snowflake...")
         

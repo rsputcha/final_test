@@ -5,7 +5,7 @@ requests
 boto3
 python-dotenv
 pandas
-pinecone-client
+pinecone
 youtube-transcript-api
 google-api-python-client
 openai

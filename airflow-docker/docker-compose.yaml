@@ -134,7 +134,7 @@ services:
 
   airflow-webserver:
     <<: *airflow-common
-    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && webserver"
+    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && airflow webserver"
     ports:
       - "8080:8080"
     volumes:
@@ -161,7 +161,7 @@ services:
 
   airflow-scheduler:
     <<: *airflow-common
-    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && scheduler"
+    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && airflow scheduler"
     volumes:
       - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
       - airflow-logs-volume:/opt/airflow/logs
@@ -188,7 +188,7 @@ services:
 
   airflow-worker:
     <<: *airflow-common
-    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && celery worker"
+    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && airflow celery worker"
     volumes:
       - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
       - airflow-logs-volume:/opt/airflow/logs
@@ -221,7 +221,7 @@ services:
 
   airflow-triggerer:
     <<: *airflow-common
-    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && triggerer"
+    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && airflow triggerer"
     volumes:
       - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
       - airflow-logs-volume:/opt/airflow/logs

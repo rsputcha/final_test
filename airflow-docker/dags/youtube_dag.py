@@ -19,6 +19,7 @@ from airflow.operators.dummy import DummyOperator
 from airflow.models import Variable
 from airflow.utils.dates import days_ago
 from dotenv import load_dotenv
+from airflow.models import Variable
 
 load_dotenv()
 
@@ -172,16 +173,16 @@ def process_city(city_key, **kwargs):
         # Get credentials from environment variables
         try:
             credentials = {
-                'youtube_api_key': os.getenv('YOUTUBE_API_KEY', ''),
-                'aws_access_key': os.getenv('AWS_ACCESS_KEY', ''),
-                'aws_secret_key': os.getenv('AWS_SECRET_KEY', ''),
-                'aws_region': os.getenv('AWS_REGION', 'us-east-2'),
-                's3_bucket_name': os.getenv('S3_BUCKET_NAME', ''),
-                'openai_api_key': os.getenv('OPENAI_API_KEY', ''),
-                'pinecone_api_key': os.getenv('PINECONE_API_KEY', ''),
-                'pinecone_index': os.getenv('PINECONE_INDEX', ''),
-                'pinecone_cloud': os.getenv('PINECONE_CLOUD', 'aws'),
-                'pinecone_region': os.getenv('PINECONE_REGION', 'us-east-1'),
+                'youtube_api_key': Variable.get('YOUTUBE_API_KEY', ''),
+                'aws_access_key': Variable.get('AWS_ACCESS_KEY', ''),
+                'aws_secret_key': Variable.get('AWS_SECRET_KEY', ''),
+                'aws_region': Variable.get('AWS_REGION', 'us-east-2'),
+                's3_bucket_name': Variable.get('S3_BUCKET_NAME', ''),
+                'openai_api_key': Variable.get('OPENAI_API_KEY', ''),
+                'pinecone_api_key': Variable.get('PINECONE_API_KEY', ''),
+                'pinecone_index': Variable.get('PINECONE_INDEX', ''),
+                'pinecone_cloud': Variable.get('PINECONE_CLOUD', 'aws'),
+                'pinecone_region': Variable.get('PINECONE_REGION', 'us-east-1'),
             }
             logger.info(f"Successfully retrieved credentials from environment variables")
             

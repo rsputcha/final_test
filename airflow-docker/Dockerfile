@@ -1,5 +1,4 @@
 FROM apache/airflow:2.10.4
-
 # First install system dependencies as root
 USER root
 RUN apt-get update && apt-get install -y \
@@ -28,10 +27,10 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Create directories with proper permissions
-RUN mkdir -p /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins /opt/airflow/config \
-    && chown -R airflow:root /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins /opt/airflow/config \
-    && chmod -R 777 /opt/airflow/logs /opt/airflow/dags /opt/airflow/plugins /opt/airflow/config
+# Create directories with explicit subdirectories and proper permissions
+RUN mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager /opt/airflow/dags /opt/airflow/plugins /opt/airflow/config \
+    && chown -R airflow:root /opt/airflow \
+    && chmod -R 777 /opt/airflow
 
 # Copy requirements file
 COPY requirements.txt /tmp/requirements.txt

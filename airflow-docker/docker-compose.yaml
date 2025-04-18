@@ -121,7 +121,7 @@ services:
 
   airflow-webserver:
     <<: *airflow-common
-    command: webserver
+    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && webserver"
     ports:
       - "8080:8080"
     healthcheck:
@@ -137,12 +137,10 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *airflow-common-env
-      #_PIP_ADDITIONAL_REQUIREMENTS: "playwright snowflake-connector-python beautifulsoup4 requests boto3 python-dotenv pandas"
 
   airflow-scheduler:
     <<: *airflow-common
-    command: scheduler
-    ##command: bash -c "python -m playwright install chromium && scheduler"
+    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && scheduler"
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
       interval: 30s
@@ -156,7 +154,6 @@ services:
         condition: service_completed_successfully
     environment:
       <<: *airflow-common-env
-      #_PIP_ADDITIONAL_REQUIREMENTS: "playwright snowflake-connector-python beautifulsoup4 requests boto3 python-dotenv pandas"
       AIRFLOW__CORE__DEFAULT_TIMEZONE: America/New_York
 
   airflow-worker:
@@ -188,7 +185,7 @@ services:
 
   airflow-triggerer:
     <<: *airflow-common
-    command: triggerer
+    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && triggerer"
     healthcheck:
       test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
       interval: 30s

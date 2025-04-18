@@ -1,4 +1,3 @@
-
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -71,12 +70,13 @@ x-airflow-common:
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     # WARNING: Use _PIP_ADDITIONAL_REQUIREMENTS option ONLY for a quick checks
     # for other purpose (development, test and especially production usage) build/extend Airflow image.
-    #_PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-playwright snowflake-connector-python beautifulsoup4 requests boto3 python-dotenv pandas pinecone google-api-python-client youtube-transcript-api spacy openai}    
+    #_PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-playwright snowflake-connector-python beautifulsoup4 requests boto3 python-dotenv pandas pinecone-client google-api-python-client youtube-transcript-api spacy openai}    
     # If you want to use it, outcomment it and replace airflow.cfg with the name of your config file
     # AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
-    - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
+    # Comment out the logs volume to use named volume instead
+    # - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
     - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
     - ${AIRFLOW_PROJ_DIR:-.}/.env:/opt/airflow/.env
@@ -90,6 +90,18 @@ x-airflow-common:
       condition: service_healthy
 
 services:
+  # Add logs-init service for proper initialization of logs volume
+  logs-init:
+    image: busybox
+    user: "0:0"
+    command: >
+      sh -c "
+        mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && 
+        chown -R 50000:0 /opt/airflow/logs && 
+        chmod -R 777 /opt/airflow/logs"
+    volumes:
+      - airflow-logs-volume:/opt/airflow/logs
+
   postgres:
     image: postgres:13
     environment:
@@ -121,9 +133,15 @@ services:
 
   airflow-webserver:
     <<: *airflow-common
-    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && webserver"
+    command: webserver
     ports:
       - "8080:8080"
+    volumes:
+      - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
+      - airflow-logs-volume:/opt/airflow/logs
+      - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
+      - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+      - ${AIRFLOW_PROJ_DIR:-.}/.env:/opt/airflow/.env
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 30s
@@ -133,6 +151,8 @@ services:
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
+      logs-init:
+        condition: service_completed_successfully
       airflow-init:
         condition: service_completed_successfully
     environment:
@@ -140,7 +160,13 @@ services:
 
   airflow-scheduler:
     <<: *airflow-common
-    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && scheduler"
+    command: scheduler
+    volumes:
+      - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
+      - airflow-logs-volume:/opt/airflow/logs
+      - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
+      - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+      - ${AIRFLOW_PROJ_DIR:-.}/.env:/opt/airflow/.env
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
       interval: 30s
@@ -150,6 +176,8 @@ services:
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
+      logs-init:
+        condition: service_completed_successfully
       airflow-init:
         condition: service_completed_successfully
     environment:
@@ -159,7 +187,12 @@ services:
   airflow-worker:
     <<: *airflow-common
     command: celery worker
-    ##command: bash -c "python -m playwright install chromium && celery worker"
+    volumes:
+      - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
+      - airflow-logs-volume:/opt/airflow/logs
+      - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
+      - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+      - ${AIRFLOW_PROJ_DIR:-.}/.env:/opt/airflow/.env
     healthcheck:
       # yamllint disable rule:line-length
       test:
@@ -171,7 +204,6 @@ services:
       start_period: 30s
     environment:
       <<: *airflow-common-env
-      #_PIP_ADDITIONAL_REQUIREMENTS: "playwright snowflake-connector-python beautifulsoup4 requests boto3 python-dotenv pandas"
       AIRFLOW__CORE__DEFAULT_TIMEZONE: America/New_York
       # Required to handle warm shutdown of the celery workers properly
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
@@ -179,13 +211,21 @@ services:
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
+      logs-init:
+        condition: service_completed_successfully
       airflow-init:
         condition: service_completed_successfully
     
 
   airflow-triggerer:
     <<: *airflow-common
-    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && triggerer"
+    command: triggerer
+    volumes:
+      - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
+      - airflow-logs-volume:/opt/airflow/logs
+      - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
+      - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
+      - ${AIRFLOW_PROJ_DIR:-.}/.env:/opt/airflow/.env
     healthcheck:
       test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
       interval: 30s
@@ -195,6 +235,8 @@ services:
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
+      logs-init:
+        condition: service_completed_successfully
       airflow-init:
         condition: service_completed_successfully
     environment:
@@ -301,8 +343,11 @@ services:
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
+      logs-init:
+        condition: service_completed_successfully
       airflow-init:
         condition: service_completed_successfully
 
 volumes:
   postgres-db-volume:
+  airflow-logs-volume:

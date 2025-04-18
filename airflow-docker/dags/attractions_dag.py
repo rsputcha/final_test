@@ -1,6 +1,6 @@
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from datetime import datetime
+from datetime import datetime, timedelta
 import asyncio
 import csv
 import time
@@ -31,7 +31,8 @@ default_args = {
     'owner': 'airflow',
     'depends_on_past': False,
     'retries': 0,  
-    'max_active_runs': 1  
+    'max_active_runs': 1,
+    'start_date': datetime(2024, 1, 1)
 }
 
 # S3 and Snowflake credentials
@@ -185,23 +186,20 @@ def load_checkpoint():
     return {"city_index": 0, "page_index": 1, "completed_cities": []}
 
 async def scrape_city_async(output_path, city_index, start_page=1, max_pages=10):
+    # Load existing data and URLs
     all_data = []
+    existing_urls = set()
+    
     if os.path.exists(output_path):
         try:
             existing_df = pd.read_csv(output_path)
             all_data = existing_df.to_dict('records')
-            logging.info(f"Loaded {len(all_data)} existing records from {output_path}")
-            
             existing_urls = set(existing_df['URL'].tolist())
-            logging.info(f"Found {len(existing_urls)} existing URLs in the dataset")
+            logging.info(f"Loaded {len(all_data)} existing records with {len(existing_urls)} unique URLs")
         except Exception as e:
             logging.error(f"Error loading existing data: {e}")
-            existing_urls = set()
-    else:
-        existing_urls = set()
-
+    
     if city_index >= len(CITY_URLS):
-        logging.info(f"City index {city_index} out of range, all cities completed")
         return all_data, True
         
     city_url = CITY_URLS[city_index]
@@ -226,7 +224,7 @@ async def scrape_city_async(output_path, city_index, start_page=1, max_pages=10)
                         logging.info(f"No more links found on page {page_num}, moving to next city")
                         break
                         
-                    # Process attractions in smaller batches
+                    # Process attractions in batches to manage memory
                     batch_size = 5
                     for batch_idx in range(0, len(read_more_links), batch_size):
                         batch_links = read_more_links[batch_idx:batch_idx+batch_size]
@@ -243,14 +241,6 @@ async def scrape_city_async(output_path, city_index, start_page=1, max_pages=10)
                                 all_data.append(data)
                                 existing_urls.add(link)
                                 city_data_count += 1
-                                
-                                # Save intermediate results frequently
-                                if len(all_data) % 5 == 0:
-                                    normalized_data = normalize_data(all_data)
-                                    df = pd.DataFrame(normalized_data)
-                                    df.to_csv(output_path, index=False)
-                                    save_checkpoint(city_index, page_num, [])
-                                    
                             except Exception as e:
                                 logging.error(f"Failed to scrape {link}: {e}")
                                 all_data.append({
@@ -266,45 +256,43 @@ async def scrape_city_async(output_path, city_index, start_page=1, max_pages=10)
                                     "Image": "N/A"
                                 })
                         
-                        await asyncio.sleep(2)
+                        # Save progress periodically
+                        if city_data_count > 0 and city_data_count % 10 == 0:
+                            normalized_data = normalize_data(all_data)
+                            df = pd.DataFrame(normalized_data)
+                            df.to_csv(output_path, index=False)
+                            logging.info(f"Saved progress: {len(all_data)} total records")
                         
-                    # Save checkpoint after each page
-                    normalized_data = normalize_data(all_data)
-                    df = pd.DataFrame(normalized_data)
-                    df.to_csv(output_path, index=False)
-                    save_checkpoint(city_index, page_num + 1, [])
+                        # Rate limiting
+                        await asyncio.sleep(2)
                     
                 except Exception as e:
                     logging.error(f"Failed to process page {page_num} of {city_name}: {e}")
-                    # Still save checkpoint to avoid reprocessing pages
-                    save_checkpoint(city_index, page_num + 1, [])
             
             await browser.close()
             logging.info(f"Completed scraping {city_name}, found {city_data_count} new attractions")
             
-            # All pages done, prepare for next city
-            normalized_data = normalize_data(all_data)
-            df = pd.DataFrame(normalized_data)
-            df.to_csv(output_path, index=False)
+            # Save final data for this city
+            if city_data_count > 0:
+                normalized_data = normalize_data(all_data)
+                df = pd.DataFrame(normalized_data)
+                df.to_csv(output_path, index=False)
             
-            # Mark city as completed and move to next city
-            completed = city_index + 1 >= len(CITY_URLS)
-            save_checkpoint(city_index + 1, 1, [city_name])
-            
-            return all_data, completed
+            return all_data, city_index + 1 >= len(CITY_URLS)
             
         except Exception as e:
             logging.error(f"Error during city scraping: {e}")
-            df = pd.DataFrame(all_data)
-            df.to_csv(output_path, index=False)
+            if len(all_data) > 0:
+                df = pd.DataFrame(all_data)
+                df.to_csv(output_path, index=False)
             return all_data, False
 
 def normalize_data(data_list):
+    """Ensure all records have the same fields to prevent CSV parsing errors"""
     all_keys = set()
     for item in data_list:
         all_keys.update(item.keys())
     
-    # Ensure all items have all keys
     normalized_data = []
     for item in data_list:
         normalized_item = {}
@@ -314,73 +302,118 @@ def normalize_data(data_list):
     
     return normalized_data
 
-def scrape_city(output_path, city_index=None, start_page=None):
-    try:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+async def scrape_all_cities_async(output_path, max_pages=10):
+    """Scrape all cities in one run and return combined data"""
+    all_data = []
+    existing_urls = set()
+    
+    if os.path.exists(output_path):
+        try:
+            existing_df = pd.read_csv(output_path)
+            all_data = existing_df.to_dict('records')
+            existing_urls = set(existing_df['URL'].tolist())
+            logging.info(f"Loaded {len(all_data)} existing records with {len(existing_urls)} unique URLs")
+        except Exception as e:
+            logging.error(f"Error loading existing data: {e}")
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
         
-        if city_index is None or start_page is None:
-            checkpoint = load_checkpoint()
-            city_index = checkpoint["city_index"]
-            start_page = checkpoint["page_index"]
-        
-        # Scrape the city
-        all_data, completed = asyncio.run(scrape_city_async(output_path, city_index, start_page))
-        
-        if completed:
-            logging.info("All cities have been scraped!")
-        else:
-            logging.info(f"City {city_index} scraped, more cities pending")
+        for city_index, city_url in enumerate(CITY_URLS):
+            city_name = city_url.split("/")[4].replace("-", " ").title()
+            logging.info(f"Scraping city {city_index+1}/{len(CITY_URLS)}: {city_name}")
+            city_data_count = 0
             
-        return len(all_data)
+            try:
+                page = await browser.new_page()
+                
+                for page_num in range(1, max_pages + 1):
+                    paginated_url = f"{city_url}?page={page_num}"
+                    logging.info(f"Scraping page {page_num}/{max_pages}: {paginated_url}")
+                    
+                    try:
+                        read_more_links = await extract_readmore_links(page, paginated_url)
+                        logging.info(f"Found {len(read_more_links)} attraction links")
+                        
+                        if not read_more_links:
+                            logging.info(f"No more links found on page {page_num}, moving to next city")
+                            break
+                            
+                        for idx, link in enumerate(read_more_links):
+                            if link in existing_urls:
+                                logging.info(f"Skipping already scraped URL: {link}")
+                                continue
+                                
+                            try:
+                                logging.info(f"Scraping place {idx + 1}/{len(read_more_links)}: {link}")
+                                data = await extract_attraction_details(page, link)
+                                data["City"] = city_name
+                                all_data.append(data)
+                                existing_urls.add(link)
+                                city_data_count += 1
+                                
+                                # Save progress periodically
+                                if city_data_count > 0 and city_data_count % 10 == 0:
+                                    normalized_data = normalize_data(all_data)
+                                    df = pd.DataFrame(normalized_data)
+                                    df.to_csv(output_path, index=False)
+                                    logging.info(f"Saved progress: {len(all_data)} total records")
+                            except Exception as e:
+                                logging.error(f"Failed to scrape {link}: {e}")
+                                all_data.append({
+                                    "URL": link, 
+                                    "City": city_name, 
+                                    "Error": str(e),
+                                    "Description": "N/A",
+                                    "Travel Tips": "N/A",
+                                    "Ticket Details": "N/A",
+                                    "Hours": "N/A",
+                                    "How to Reach": "N/A",
+                                    "Restaurants Nearby": "N/A",
+                                    "Image": "N/A"
+                                })
+                        
+                        # Save after each page
+                        normalized_data = normalize_data(all_data)
+                        df = pd.DataFrame(normalized_data)
+                        df.to_csv(output_path, index=False)
+                        logging.info(f"Saved progress after page {page_num}: {len(all_data)} total records")
+                        
+                    except Exception as e:
+                        logging.error(f"Failed to process page {page_num} of {city_name}: {e}")
+                
+                await page.close()
+                logging.info(f"Completed scraping {city_name}, found {city_data_count} new attractions")
+                
+            except Exception as e:
+                logging.error(f"Error processing city {city_name}: {e}")
+                # Continue with next city
         
-    except Exception as e:
-        logging.error(f"Error in scrape_city: {e}")
-        raise
+        await browser.close()
+    
+    # Final save of all data
+    normalized_data = normalize_data(all_data)
+    df = pd.DataFrame(normalized_data)
+    df.to_csv(output_path, index=False)
+    logging.info(f"Completed scraping all cities, total {len(all_data)} attractions saved")
+    
+    return all_data
 
 def scrape_attractions_all_cities(output_path):
+    """Process all cities in one run"""
     try:
+        # Ensure output directory exists
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         
-        total_attractions = 0
+        # Process all cities at once
+        all_data = asyncio.run(scrape_all_cities_async(output_path))
         
-        for i in range(len(CITY_URLS)):
-            result = scrape_city(output_path, city_index=i, start_page=1)
-            total_attractions += result
-            logging.info(f"Completed city {i+1}/{len(CITY_URLS)}, total attractions: {total_attractions}")
-            
-        return total_attractions
+        logging.info(f"Completed scraping all cities, total attractions: {len(all_data)}")
+        return len(all_data)
     
     except Exception as e:
         logging.error(f"Error processing all cities: {e}")
         raise
-
-def scrape_attractions(output_path):
-    try:
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
-        checkpoint = load_checkpoint()
-        city_index = checkpoint["city_index"]
-        start_page = checkpoint["page_index"]
-        
-        if city_index >= len(CITY_URLS):
-            logging.info("All cities have been scraped already!")
-            save_checkpoint(0, 1, [])
-            city_index = 0
-            start_page = 1
-            
-        # Scrape one city at a time
-        result = scrape_city(output_path, city_index, start_page)
-        logging.info(f"Attraction scraping completed for city {city_index}, saved {result} attractions to {output_path}")
-        return result
-        
-    except Exception as e:
-        logging.error(f"Error running the scraping process: {e}")
-        raise
-
-def reset_checkpoint():
-    """Reset the checkpoint to start from the beginning"""
-    save_checkpoint(0, 1, [])
-    return "Checkpoint reset to start with first city"
 
 def clean_attractions_csv(input_path, output_path):
     try:
@@ -548,6 +581,7 @@ def load_from_s3_to_snowflake(s3_bucket, s3_key, table_name):
         response = s3.get_object(Bucket=s3_bucket, Key=s3_key)
         csv_content = response['Body'].read().decode('utf-8')
         
+        # Use on_bad_lines parameter for newer pandas versions
         df = pd.read_csv(StringIO(csv_content), on_bad_lines='skip')
         logging.info(f"CSV contains {len(df)} rows and {len(df.columns)} columns")
         
@@ -566,6 +600,7 @@ def load_from_s3_to_snowflake(s3_bucket, s3_key, table_name):
                 logging.info(f"Adding missing column: {col}")
                 df[col] = ""
                 
+        # Add IMAGE column if missing
         if 'Image' not in df.columns:
             logging.info("Adding missing Image column")
             df['Image'] = ''
@@ -594,6 +629,8 @@ def load_from_s3_to_snowflake(s3_bucket, s3_key, table_name):
         # Connect to Snowflake
         conn = snowflake.connector.connect(**SNOWFLAKE_CREDENTIALS)
         cursor = conn.cursor()
+
+        cursor.execute("USE ROLE ACCOUNTADMIN")
 
         logging.info(f"Creating table {table_name} with predefined schema...")
         create_table_sql = f"""
@@ -679,58 +716,22 @@ def load_from_s3_to_snowflake(s3_bucket, s3_key, table_name):
         logging.error(f"Error loading to Snowflake: {e}")
         raise
 
-def process_next_city():
-    checkpoint = load_checkpoint()
-    city_index = checkpoint["city_index"]
-    
-    if city_index >= len(CITY_URLS):
-        # Reset to start with the first city
-        save_checkpoint(0, 1, [])
-        return "All cities processed, resetting to first city"
-    
-    result = scrape_city(RAW_ATTRACTIONS_PATH, city_index, checkpoint["page_index"])
-    return f"Processed city {city_index} ({CITY_URLS[city_index].split('/')[4]}), found {result} attractions"
-
-def process_all():
-    try:
-        process_next_city()
-
-        clean_attractions_csv(RAW_ATTRACTIONS_PATH, CLEAN_ATTRACTIONS_PATH)
-        
-        add_coordinates_to_csv(CLEAN_ATTRACTIONS_PATH, GEOCODED_ATTRACTIONS_PATH)
-        
-        upload_to_s3(GEOCODED_ATTRACTIONS_PATH, s3_bucket, GEOCODED_ATTRACTIONS_S3_KEY)
-        
-        load_from_s3_to_snowflake(s3_bucket, GEOCODED_ATTRACTIONS_S3_KEY, SNOWFLAKE_ATTRACTIONS_TABLE)
-        
-        return "Complete processing pipeline executed successfully"
-    
-    except Exception as e:
-        logging.error(f"Error in process_all: {e}")
-        raise
-
-
+# DAG definition with the updated schedule to run at 7:30 AM daily
 with DAG(
-    dag_id="triphobo_attractions_scrape",
+    dag_id="triphobo_attractions_pipeline",
     default_args=default_args,
-    start_date=datetime(2024, 1, 1),
-    schedule="@daily",  
+    schedule="30 7 * * *", 
     catchup=False,
     max_active_runs=1,  
     tags=["triphobo", "tourism", "scrape"]
 ) as dag:
     
-    reset_checkpoint_task = PythonOperator(
-        task_id="reset_checkpoint",
-        python_callable=reset_checkpoint,
-        dag=dag,
-        trigger_rule="all_done" 
-    )
-    
-    # Task to process the next city
-    process_next_city_task = PythonOperator(
-        task_id="process_next_city",
-        python_callable=process_next_city,
+    # Task to scrape all cities in one run
+    scrape_all_cities_task = PythonOperator(
+        task_id="scrape_all_cities",
+        python_callable=scrape_attractions_all_cities,
+        op_kwargs={"output_path": RAW_ATTRACTIONS_PATH},
+        execution_timeout=timedelta(hours=6),  # Allow up to 6 hours for scraping all cities
         dag=dag
     )
     
@@ -774,5 +775,5 @@ with DAG(
         dag=dag
     )
 
-    # Parallel flow - either use the process_all task or the individual tasks
-    process_next_city_task >> clean_attractions_task >> geocode_attractions_task >> upload_geocoded_attractions_task >> load_to_snowflake_task >> reset_checkpoint_task
+    # Task dependencies - process all cities then perform the remaining steps
+    scrape_all_cities_task >> clean_attractions_task >> geocode_attractions_task >> upload_geocoded_attractions_task >> load_to_snowflake_task

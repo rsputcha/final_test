@@ -15,6 +15,7 @@ import snowflake.connector
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
+from airflow.models import Variable
 
 # Load environment variables
 load_dotenv()
@@ -35,7 +36,7 @@ CLEAN_TOURS_PATH = f"{DATA_DIR}/cleaned_tours.csv"
 GEOCODED_TOURS_PATH = f"{DATA_DIR}/tours_with_coords.csv"
 
 # AWS + S3
-S3_BUCKET = os.getenv("S3_BUCKET", "bigdatafinal2025")
+S3_BUCKET = Variable.get("S3_BUCKET", "bigdatafinal2025")
 RAW_TOURS_S3_KEY = "raw/triphobo_multi_city_tours.csv"
 CLEAN_TOURS_S3_KEY = "clean/cleaned_tours.csv"
 GEOCODED_TOURS_S3_KEY = "clean/tours_with_coords.csv"
@@ -43,15 +44,15 @@ GEOCODED_TOURS_S3_KEY = "clean/tours_with_coords.csv"
 # Snowflake table
 SNOWFLAKE_TOURS_TABLE = "FINAL_PROJECT.SCRAPING.TRIPHOBO_TOURS"
 SNOWFLAKE_CREDENTIALS = {
-    "user": os.getenv("SNOWFLAKE_USER"),
-    "password": os.getenv("SNOWFLAKE_PASSWORD"),
-    "account": os.getenv("SNOWFLAKE_ACCOUNT"),
-    "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
-    "database": os.getenv("SNOWFLAKE_DATABASE"),
-    "schema": os.getenv("SNOWFLAKE_SCHEMA"),
-    "role": os.getenv("SNOWFLAKE_ROLE", "SYSADMIN")
+    "user": Variable.get("SNOWFLAKE_USER"),
+    "password": Variable.get("SNOWFLAKE_PASSWORD"),
+    "account": Variable.get("SNOWFLAKE_ACCOUNT"),
+    "warehouse": Variable.get("SNOWFLAKE_WAREHOUSE"),
+    "database": Variable.get("SNOWFLAKE_DATABASE"),
+    "schema": Variable.get("SNOWFLAKE_SCHEMA"),
+    "role": Variable.get("SNOWFLAKE_ROLE", "SYSADMIN")
 }
-S3_STAGE = os.getenv("SNOWFLAKE_STAGE", "Data")
+S3_STAGE = Variable.get("SNOWFLAKE_STAGE", "Data")
 
 # City data for geocoding
 CITY_CENTERS = {
@@ -66,19 +67,19 @@ CITY_CENTERS = {
 # Verify environment variables
 def verify_env_vars():
     required_vars = {
-        "AWS_ACCESS_KEY": os.getenv("AWS_ACCESS_KEY"),
-        "AWS_SECRET_KEY": os.getenv("AWS_SECRET_KEY"),
-        "AWS_REGION": os.getenv("AWS_REGION"),
-        "S3_BUCKET": os.getenv("S3_BUCKET"),
-        "SNOWFLAKE_USER": os.getenv("SNOWFLAKE_USER"),
-        "SNOWFLAKE_PASSWORD": os.getenv("SNOWFLAKE_PASSWORD"),
-        "SNOWFLAKE_ACCOUNT": os.getenv("SNOWFLAKE_ACCOUNT"),
-        "SNOWFLAKE_WAREHOUSE": os.getenv("SNOWFLAKE_WAREHOUSE"),
-        "SNOWFLAKE_DATABASE": os.getenv("SNOWFLAKE_DATABASE"),
-        "SNOWFLAKE_SCHEMA": os.getenv("SNOWFLAKE_SCHEMA"),
-        "SNOWFLAKE_STAGE": os.getenv("SNOWFLAKE_STAGE"),
-        "SNOWFLAKE_ROLE": os.getenv("SNOWFLAKE_ROLE"),
-        "GOOGLE_MAPS_API_KEY": os.getenv("GOOGLE_MAPS_API_KEY")
+        "AWS_ACCESS_KEY": Variable.get("AWS_ACCESS_KEY"),
+        "AWS_SECRET_KEY": Variable.get("AWS_SECRET_KEY"),
+        "AWS_REGION": Variable.get("AWS_REGION"),
+        "S3_BUCKET": Variable.get("S3_BUCKET"),
+        "SNOWFLAKE_USER": Variable.get("SNOWFLAKE_USER"),
+        "SNOWFLAKE_PASSWORD": Variable.get("SNOWFLAKE_PASSWORD"),
+        "SNOWFLAKE_ACCOUNT": Variable.get("SNOWFLAKE_ACCOUNT"),
+        "SNOWFLAKE_WAREHOUSE": Variable.get("SNOWFLAKE_WAREHOUSE"),
+        "SNOWFLAKE_DATABASE": Variable.get("SNOWFLAKE_DATABASE"),
+        "SNOWFLAKE_SCHEMA": Variable.get("SNOWFLAKE_SCHEMA"),
+        "SNOWFLAKE_STAGE": Variable.get("SNOWFLAKE_STAGE"),
+        "SNOWFLAKE_ROLE": Variable.get("SNOWFLAKE_ROLE"),
+        "GOOGLE_MAPS_API_KEY": Variable.get("GOOGLE_MAPS_API_KEY")
     }
     
     missing_vars = [key for key, value in required_vars.items() if not value]
@@ -95,9 +96,9 @@ def download_from_s3(bucket, s3_key, local_file_path):
     """Download a file from S3 to a local path"""
     s3 = boto3.client(
         "s3",
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_KEY"),
-        region_name=os.getenv("AWS_REGION")
+        aws_access_key_id=Variable.get("AWS_ACCESS_KEY"),
+        aws_secret_access_key=Variable.get("AWS_SECRET_KEY"),
+        region_name=Variable.get("AWS_REGION")
     )
     
     try:
@@ -114,7 +115,7 @@ def upload_to_s3(file_path, bucket, s3_key, aws_access_key, aws_secret_key):
         "s3",
         aws_access_key_id=aws_access_key,
         aws_secret_access_key=aws_secret_key,
-        region_name=os.getenv("AWS_REGION")
+        region_name=Variable.get("AWS_REGION")
     )
     
     try:
@@ -302,9 +303,9 @@ def clean_tours_csv(s3_bucket, s3_key, output_path):
         # Download from S3
         s3 = boto3.client(
             "s3",
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_KEY"),
-            region_name=os.getenv("AWS_REGION")
+            aws_access_key_id=Variable.get("AWS_ACCESS_KEY"),
+            aws_secret_access_key=Variable.get("AWS_SECRET_KEY"),
+            region_name=Variable.get("AWS_REGION")
         )
         
         logging.info(f"Downloading tours data from s3://{s3_bucket}/{s3_key}")
@@ -368,7 +369,7 @@ def extract_city_name(city_string):
 
 def geocode_place(place_name, city_name):
     """Geocode a place using Google Maps API"""
-    API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+    API_KEY = Variable.get("GOOGLE_MAPS_API_KEY")
     search_query = f"{place_name}, {CITY_CENTERS.get(city_name, '')}" if city_name in CITY_CENTERS else place_name
     url = "https://maps.googleapis.com/maps/api/geocode/json"
     params = {"address": search_query, "key": API_KEY}
@@ -467,9 +468,9 @@ def load_tours_from_s3_to_snowflake():
     try:
         s3 = boto3.client(
             "s3",
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_KEY"),
-            region_name=os.getenv("AWS_REGION")
+            aws_access_key_id=Variable.get("AWS_ACCESS_KEY"),
+            aws_secret_access_key=Variable.get("AWS_SECRET_KEY"),
+            region_name=Variable.get("AWS_REGION")
         )
         response = s3.get_object(Bucket=S3_BUCKET, Key=GEOCODED_TOURS_S3_KEY)
         csv_content = response['Body'].read().decode('utf-8')
@@ -584,8 +585,8 @@ with DAG(
             "file_path": RAW_TOURS_PATH,
             "bucket": S3_BUCKET,
             "s3_key": RAW_TOURS_S3_KEY,
-            "aws_access_key": os.getenv("AWS_ACCESS_KEY"),
-            "aws_secret_key": os.getenv("AWS_SECRET_KEY")
+            "aws_access_key": Variable.get("AWS_ACCESS_KEY"),
+            "aws_secret_key": Variable.get("AWS_SECRET_KEY")
         }
     )
     
@@ -612,8 +613,8 @@ with DAG(
             "file_path": GEOCODED_TOURS_PATH,
             "bucket": S3_BUCKET,
             "s3_key": GEOCODED_TOURS_S3_KEY,
-            "aws_access_key": os.getenv("AWS_ACCESS_KEY"),
-            "aws_secret_key": os.getenv("AWS_SECRET_KEY")
+            "aws_access_key": Variable.get("AWS_ACCESS_KEY"),
+            "aws_secret_key": Variable.get("AWS_SECRET_KEY")
         }
     )
 

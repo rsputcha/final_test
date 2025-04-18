@@ -68,6 +68,7 @@ x-airflow-common:
     # See https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html#scheduler-health-check-server
     # yamllint enable rule:line-length
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    AIRFLOW__LOGGING__LOGGING_LEVEL: DEBUG
     # WARNING: Use _PIP_ADDITIONAL_REQUIREMENTS option ONLY for a quick checks
     # for other purpose (development, test and especially production usage) build/extend Airflow image.
     #_PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-playwright snowflake-connector-python beautifulsoup4 requests boto3 python-dotenv pandas pinecone-client google-api-python-client youtube-transcript-api spacy openai}    
@@ -133,7 +134,7 @@ services:
 
   airflow-webserver:
     <<: *airflow-common
-    command: webserver
+    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && webserver"
     ports:
       - "8080:8080"
     volumes:
@@ -160,7 +161,7 @@ services:
 
   airflow-scheduler:
     <<: *airflow-common
-    command: scheduler
+    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && scheduler"
     volumes:
       - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
       - airflow-logs-volume:/opt/airflow/logs
@@ -168,8 +169,8 @@ services:
       - ${AIRFLOW_PROJ_DIR:-.}/plugins:/opt/airflow/plugins
       - ${AIRFLOW_PROJ_DIR:-.}/.env:/opt/airflow/.env
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
-      interval: 30s
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
+      interval: 10s
       timeout: 10s
       retries: 5
       start_period: 30s
@@ -183,10 +184,11 @@ services:
     environment:
       <<: *airflow-common-env
       AIRFLOW__CORE__DEFAULT_TIMEZONE: America/New_York
+      AIRFLOW__LOGGING__LOGGING_LEVEL: DEBUG
 
   airflow-worker:
     <<: *airflow-common
-    command: celery worker
+    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && celery worker"
     volumes:
       - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
       - airflow-logs-volume:/opt/airflow/logs
@@ -219,7 +221,7 @@ services:
 
   airflow-triggerer:
     <<: *airflow-common
-    command: triggerer
+    command: bash -c "mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager && chmod -R 777 /opt/airflow/logs && triggerer"
     volumes:
       - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
       - airflow-logs-volume:/opt/airflow/logs
@@ -298,6 +300,10 @@ services:
         fi
         mkdir -p /sources/logs /sources/dags /sources/plugins
         chown -R "${AIRFLOW_UID}:0" /sources/{logs,dags,plugins}
+        # Create and set permissions for logs directories
+        mkdir -p /opt/airflow/logs/scheduler /opt/airflow/logs/dag_processor_manager
+        chown -R "${AIRFLOW_UID}:0" /opt/airflow/logs
+        chmod -R 777 /opt/airflow/logs
         exec /entrypoint airflow version
     # yamllint enable rule:line-length
     environment:
@@ -310,6 +316,7 @@ services:
     user: "0:0"
     volumes:
       - ${AIRFLOW_PROJ_DIR:-.}:/sources
+      - airflow-logs-volume:/opt/airflow/logs
 
   airflow-cli:
     <<: *airflow-common

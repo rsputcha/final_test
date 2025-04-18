@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from playwright.async_api import async_playwright
 from dotenv import load_dotenv
 import json
+from airflow.models import Variable
 
 # Configure logging
 logging.basicConfig(
@@ -34,23 +35,23 @@ default_args = {
 }
 
 # S3 and Snowflake credentials
-aws_key = os.getenv("AWS_ACCESS_KEY")
-aws_secret = os.getenv("AWS_SECRET_KEY")
-aws_region = os.getenv("AWS_REGION")
-google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
-s3_bucket = os.getenv("S3_BUCKET", "bigdatafinal2025")
+aws_key = Variable.get("AWS_ACCESS_KEY")
+aws_secret = Variable.get("AWS_SECRET_KEY")
+aws_region = Variable.get("AWS_REGION")
+google_maps_api_key = Variable.get("GOOGLE_MAPS_API_KEY")
+s3_bucket = Variable.get("S3_BUCKET", "bigdatafinal2025")
 
 SNOWFLAKE_CREDENTIALS = {
-    "user": os.getenv("SNOWFLAKE_USER"),
-    "password": os.getenv("SNOWFLAKE_PASSWORD"),
-    "account": os.getenv("SNOWFLAKE_ACCOUNT"),
-    "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE"),
-    "database": os.getenv("SNOWFLAKE_DATABASE"),
-    "schema": os.getenv("SNOWFLAKE_SCHEMA"),
-    "role": os.getenv("SNOWFLAKE_ROLE")
+    "user": Variable.get("SNOWFLAKE_USER"),
+    "password": Variable.get("SNOWFLAKE_PASSWORD"),
+    "account": Variable.get("SNOWFLAKE_ACCOUNT"),
+    "warehouse": Variable.get("SNOWFLAKE_WAREHOUSE"),
+    "database": Variable.get("SNOWFLAKE_DATABASE"),
+    "schema": Variable.get("SNOWFLAKE_SCHEMA"),
+    "role": Variable.get("SNOWFLAKE_ROLE")
 }
 
-S3_STAGE = os.getenv("SNOWFLAKE_STAGE")
+S3_STAGE = Variable.get("SNOWFLAKE_STAGE")
 
 # File paths
 DATA_DIR = "/tmp/triphobo_data"
